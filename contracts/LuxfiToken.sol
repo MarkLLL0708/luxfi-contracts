@@ -30,9 +30,12 @@ contract LuxfiToken is ERC20, Ownable, ReentrancyGuard, Pausable {
     uint256 public constant MAX_PURCHASE = 1000000;
     uint256 public constant MAX_WALLET_PERCENT = 100;
     uint256 public constant TOTAL_SUPPLY_CAP = 1000000000;
+    uint256 public constant HARD_CAP = 1000000000 * 1e18;
     uint256 public constant PRICE_STALENESS_THRESHOLD = 1 hours;
+    uint256 public constant MAX_PAUSE_DURATION = 7 days;
 
     AggregatorV3Interface public priceFeed;
+    uint256 public pausedAt;
 
     mapping(uint256 => Asset) public assets;
     mapping(address => mapping(uint256 => uint256)) public assetHoldings;
@@ -74,26 +77,44 @@ contract LuxfiToken is ERC20, Ownable, ReentrancyGuard, Pausable {
     }
 
     function buyTokens(uint256 assetId, uint256 tokenAmount) external payable nonReentrant whenNotPaused {
+        // Block flash loan attacks
+        require(tx.origin == msg.sender, "Contracts not allowed");
+
         require(tokenAmount > 0, "Zero amount");
         require(tokenAmount <= MAX_PURCHASE, "Exceeds max purchase");
+
+        // Hard cap on total supply
+        require(totalSupply() + tokenAmount * 1e18 <= HARD_CAP, "Hard cap reached");
+
+        // Anti-whale
         require(
             totalTokensHeld[msg.sender] + tokenAmount <= (TOTAL_SUPPLY_CAP * MAX_WALLET_PERCENT) / 10000,
             "Exceeds wallet cap"
         );
+
+        // Check pause not expired
+        if (paused()) {
+            require(block.timestamp - pausedAt <= MAX_PAUSE_DURATION, "Pause expired");
+        }
+
         Asset storage a = assets[assetId];
         require(a.active, "Asset not active");
         require(a.soldTokens + tokenAmount <= a.totalTokens, "Sold out");
+
         uint256 costBNB = getCostBNB(assetId, tokenAmount);
         require(msg.value >= costBNB, "Not enough BNB");
+
         _mint(msg.sender, tokenAmount * 1e18);
         assetHoldings[msg.sender][assetId] += tokenAmount;
         totalTokensHeld[msg.sender] += tokenAmount;
         a.soldTokens += tokenAmount;
         totalSpentBNB[msg.sender] += costBNB;
+
         if (msg.value > costBNB) {
             (bool refundSuccess, ) = payable(msg.sender).call{value: msg.value - costBNB}("");
             require(refundSuccess, "Refund failed");
         }
+
         emit TokensPurchased(msg.sender, assetId, tokenAmount, costBNB);
     }
 
@@ -123,8 +144,20 @@ contract LuxfiToken is ERC20, Ownable, ReentrancyGuard, Pausable {
         emit PriceFeedUpdated(newFeed);
     }
 
-    function pause() external onlyOwner { _pause(); }
-    function unpause() external onlyOwner { _unpause(); }
+    function pause() external onlyOwner {
+        pausedAt = block.timestamp;
+        _pause();
+    }
+
+    function unpause() external onlyOwner {
+        _unpause();
+    }
+
+    function forceUnpause() external {
+        require(paused(), "Not paused");
+        require(block.timestamp - pausedAt > MAX_PAUSE_DURATION, "Pause still valid");
+        _unpause();
+    }
 
     function withdraw() external onlyOwner {
         uint256 balance = address(this).balance;
@@ -145,4 +178,8 @@ contract LuxfiToken is ERC20, Ownable, ReentrancyGuard, Pausable {
     function getHolding(address holder, uint256 assetId) external view returns (uint256) { return assetHoldings[holder][assetId]; }
 
     function getYield(address holder, uint256 assetId) external view returns (uint256) { return yieldEarned[holder][assetId]; }
+
+    function isHardCapReached() external view returns (bool) { return totalSupply() >= HARD_CAP; }
+
+    function remainingSupply() external view returns (uint256) { return HARD_CAP - totalSupply(); }
 }

@@ -1,0 +1,103 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/access/Ownable.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+
+contract FounderVesting is Ownable, ReentrancyGuard {
+
+    IERC20 public luxfiToken;
+
+    uint256 public constant VESTING_DURATION = 730 days;
+    uint256 public constant CLIFF_PERIOD = 180 days;
+    uint256 public constant RELEASE_INTERVAL = 180 days;
+    uint256 public constant TOTAL_RELEASES = 4;
+
+    struct VestingSchedule {
+        address beneficiary;
+        uint256 totalAmount;
+        uint256 amountClaimed;
+        uint256 startTime;
+        uint256 lastClaimTime;
+        uint256 releasesClaimed;
+        bool active;
+        string role;
+    }
+
+    uint256 public scheduleCount;
+    mapping(uint256 => VestingSchedule) public schedules;
+    mapping(address => uint256[]) public beneficiarySchedules;
+
+    event VestingCreated(uint256 indexed id, address beneficiary, uint256 amount, string role);
+    event TokensClaimed(uint256 indexed id, address beneficiary, uint256 amount);
+    event VestingRevoked(uint256 indexed id);
+
+    constructor(address _luxfiToken) Ownable(msg.sender) {
+        luxfiToken = IERC20(_luxfiToken);
+    }
+
+    function createVesting(address beneficiary, uint256 amount, string calldata role) external onlyOwner returns (uint256) {
+        require(beneficiary != address(0), "Zero address");
+        require(amount > 0, "Zero amount");
+        require(luxfiToken.transferFrom(msg.sender, address(this), amount), "Transfer failed");
+        uint256 id = scheduleCount++;
+        schedules[id] = VestingSchedule(beneficiary, amount, 0, block.timestamp, block.timestamp, 0, true, role);
+        beneficiarySchedules[beneficiary].push(id);
+        emit VestingCreated(id, beneficiary, amount, role);
+        return id;
+    }
+
+    function claimVested(uint256 scheduleId) external nonReentrant {
+        VestingSchedule storage s = schedules[scheduleId];
+        require(msg.sender == s.beneficiary, "Not beneficiary");
+        require(s.active, "Not active");
+        require(s.releasesClaimed < TOTAL_RELEASES, "All released");
+        uint256 elapsed = block.timestamp - s.startTime;
+        require(elapsed >= CLIFF_PERIOD, "Cliff not reached - wait 6 months");
+        uint256 releasesAvailable = elapsed / RELEASE_INTERVAL;
+        if (releasesAvailable > TOTAL_RELEASES) releasesAvailable = TOTAL_RELEASES;
+        uint256 newReleases = releasesAvailable - s.releasesClaimed;
+        require(newReleases > 0, "Nothing to claim yet");
+        uint256 amountPerRelease = s.totalAmount / TOTAL_RELEASES;
+        uint256 claimable = newReleases * amountPerRelease;
+        if (s.releasesClaimed + newReleases == TOTAL_RELEASES) {
+            claimable = s.totalAmount - s.amountClaimed;
+        }
+        s.amountClaimed += claimable;
+        s.releasesClaimed += newReleases;
+        s.lastClaimTime = block.timestamp;
+        require(luxfiToken.transfer(msg.sender, claimable), "Transfer failed");
+        emit TokensClaimed(scheduleId, msg.sender, claimable);
+    }
+
+    function revokeVesting(uint256 scheduleId) external onlyOwner {
+        VestingSchedule storage s = schedules[scheduleId];
+        require(s.active, "Not active");
+        s.active = false;
+        uint256 remaining = s.totalAmount - s.amountClaimed;
+        if (remaining > 0) {
+            require(luxfiToken.transfer(owner(), remaining), "Transfer failed");
+        }
+        emit VestingRevoked(scheduleId);
+    }
+
+    function getClaimable(uint256 scheduleId) external view returns (uint256) {
+        VestingSchedule storage s = schedules[scheduleId];
+        if (!s.active || s.releasesClaimed >= TOTAL_RELEASES) return 0;
+        uint256 elapsed = block.timestamp - s.startTime;
+        if (elapsed < CLIFF_PERIOD) return 0;
+        uint256 releasesAvailable = elapsed / RELEASE_INTERVAL;
+        if (releasesAvailable > TOTAL_RELEASES) releasesAvailable = TOTAL_RELEASES;
+        uint256 newReleases = releasesAvailable - s.releasesClaimed;
+        if (newReleases == 0) return 0;
+        if (s.releasesClaimed + newReleases == TOTAL_RELEASES) return s.totalAmount - s.amountClaimed;
+        return newReleases * (s.totalAmount / TOTAL_RELEASES);
+    }
+
+    function getSchedule(uint256 id) external view returns (VestingSchedule memory) { return schedules[id]; }
+
+    function getBeneficiarySchedules(address beneficiary) external view returns (uint256[] memory) {
+        return beneficiarySchedules[beneficiary];
+    }
+}

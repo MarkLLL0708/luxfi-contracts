@@ -9,9 +9,9 @@ contract FounderVesting is Ownable, ReentrancyGuard {
 
     IERC20 public luxfiToken;
 
-    uint256 public constant VESTING_DURATION = 730 days;
-    uint256 public constant CLIFF_PERIOD = 180 days;
-    uint256 public constant RELEASE_INTERVAL = 180 days;
+    uint256 public constant VESTING_DURATION = 365 days;
+    uint256 public constant CLIFF_PERIOD = 90 days;
+    uint256 public constant RELEASE_INTERVAL = 90 days;
     uint256 public constant TOTAL_RELEASES = 4;
 
     struct VestingSchedule {
@@ -54,7 +54,7 @@ contract FounderVesting is Ownable, ReentrancyGuard {
         require(s.active, "Not active");
         require(s.releasesClaimed < TOTAL_RELEASES, "All released");
         uint256 elapsed = block.timestamp - s.startTime;
-        require(elapsed >= CLIFF_PERIOD, "Cliff not reached - wait 6 months");
+        require(elapsed >= CLIFF_PERIOD, "Cliff not reached - wait 3 months");
         uint256 releasesAvailable = elapsed / RELEASE_INTERVAL;
         if (releasesAvailable > TOTAL_RELEASES) releasesAvailable = TOTAL_RELEASES;
         uint256 newReleases = releasesAvailable - s.releasesClaimed;

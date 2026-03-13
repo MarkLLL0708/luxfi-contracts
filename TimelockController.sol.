@@ -1,0 +1,65 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.20;
+
+import "@openzeppelin/contracts/access/Ownable.sol";
+
+contract LuxfiTimelock is Ownable {
+
+    uint256 public constant MIN_DELAY = 48 hours;
+
+    struct Transaction {
+        address target;
+        bytes data;
+        uint256 executeAfter;
+        bool executed;
+        bool cancelled;
+        string description;
+    }
+
+    uint256 public txCount;
+    mapping(uint256 => Transaction) public transactions;
+
+    event TransactionQueued(uint256 indexed txId, address target, string description, uint256 executeAfter);
+    event TransactionExecuted(uint256 indexed txId);
+    event TransactionCancelled(uint256 indexed txId);
+
+    constructor() Ownable(msg.sender) {}
+
+    function queueTransaction(address target, bytes calldata data, string calldata description) external onlyOwner returns (uint256) {
+        require(target != address(0), "Zero address");
+        uint256 executeAfter = block.timestamp + MIN_DELAY;
+        uint256 txId = txCount++;
+        transactions[txId] = Transaction(target, data, executeAfter, false, false, description);
+        emit TransactionQueued(txId, target, description, executeAfter);
+        return txId;
+    }
+
+    function executeTransaction(uint256 txId) external onlyOwner {
+        Transaction storage t = transactions[txId];
+        require(!t.executed, "Already executed");
+        require(!t.cancelled, "Cancelled");
+        require(block.timestamp >= t.executeAfter, "Too early - 48hr delay not passed");
+        t.executed = true;
+        (bool success, ) = t.target.call(t.data);
+        require(success, "Execution failed");
+        emit TransactionExecuted(txId);
+    }
+
+    function cancelTransaction(uint256 txId) external onlyOwner {
+        Transaction storage t = transactions[txId];
+        require(!t.executed, "Already executed");
+        require(!t.cancelled, "Already cancelled");
+        t.cancelled = true;
+        emit TransactionCancelled(txId);
+    }
+
+    function getTransaction(uint256 txId) external view returns (Transaction memory) {
+        return transactions[txId];
+    }
+
+    function getTimeRemaining(uint256 txId) external view returns (uint256) {
+        Transaction storage t = transactions[txId];
+        if (block.timestamp >= t.executeAfter) return 0;
+        return t.executeAfter - block.timestamp;
+    }
+}

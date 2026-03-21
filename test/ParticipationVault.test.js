@@ -48,8 +48,9 @@ describe("ParticipationVault", function () {
 
   it("Should not unstake before lock period", async function () {
     await vault.connect(user1).stake(0, ethers.parseEther("100"), 30);
+    // Stake fee is 0.5% so tokenAmount = 99.5 ether; unstake 90 to pass amount check but hit lock period
     await expect(
-      vault.connect(user1).unstake(0, ethers.parseEther("100"))
+      vault.connect(user1).unstake(0, ethers.parseEther("90"))
     ).to.be.revertedWith("Still in lock period");
   });
 

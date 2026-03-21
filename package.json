@@ -1,13 +1,21 @@
 {
-"name": "luxfi-contracts",
-"version": "1.0.0",
-"scripts": {
-"test": "hardhat test",
-"compile": "hardhat compile"
-},
-"devDependencies": {
-"@nomicfoundation/hardhat-toolbox": "^4.0.0",
-"@openzeppelin/contracts": "^5.0.0",
-"hardhat": "^2.19.0"
+  "name": "luxfi-contracts",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "hardhat test",
+    "compile": "hardhat compile"
+  },
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^4.0.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "hardhat": "^2.19.0"
+  },
+  "dependencies": {
+    "@chainlink/contracts": "^0.8.0"
+  }
 }
-}
+```
+
+Commit message:
+```
+fix: add @chainlink/contracts dependency

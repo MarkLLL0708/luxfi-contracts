@@ -4,15 +4,14 @@ describe("RewardDistributor", function () {
 let token, distributor, owner, user1, user2;
 beforeEach(async function () {
 [owner, user1, user2] = await ethers.getSigners();
-const LuxfiToken = await ethers.getContractFactory("LuxfiToken");
-token = await LuxfiToken.deploy();
+const MockERC20 = await ethers.getContractFactory("MockERC20");
+token = await MockERC20.deploy("LUXFI Token", "LUXFI");
 await token.waitForDeployment();
 const RewardDistributor = await ethers.getContractFactory("RewardDistributor");
 distributor = await RewardDistributor.deploy(await token.getAddress());
 await distributor.waitForDeployment();
-await token.registerAsset("CLAY_AND_CLOUD", "Beverages", 50000000, 200000000, 10);
-const cost = await token.getCostBNB(0, 100000);
-await token.connect(owner).buyTokens(0, 100000, { value: cost });
+// Mint tokens to owner and approve distributor
+await token.mint(owner.address, ethers.parseEther("100000"));
 await token.approve(await distributor.getAddress(), ethers.parseEther("100000"));
 });
 it("Should create a reward pool", async function () {

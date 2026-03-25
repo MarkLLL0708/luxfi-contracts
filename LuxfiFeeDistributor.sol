@@ -237,8 +237,7 @@ contract LuxfiFeeDistributor is Ownable, Pausable, ReentrancyGuard {
         emit StakerRegistered(staker, amount);
     }
 
-    function unregisterStaker(address staker) external {
-        require(msg.sender == stakingPool || msg.sender == owner(), "Not authorized");
+    function unregisterStaker(address staker) external {require(msg.sender == stakingPool, "Only staking contract");
         totalStaked -= stakedAmount[staker];
         stakedAmount[staker] = 0;
         isStaker[staker] = false;

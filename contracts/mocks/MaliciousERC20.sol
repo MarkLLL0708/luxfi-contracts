@@ -27,8 +27,3 @@ contract MaliciousERC20 is ERC20 {
         }
     }
 }
-```
-
-Commit message:
-```
-fix: remove markdown artifacts from MaliciousERC20.sol

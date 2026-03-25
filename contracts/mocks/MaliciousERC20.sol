@@ -12,9 +12,13 @@ contract MaliciousERC20 is ERC20 {
 
     constructor() ERC20("MAL", "MAL") {}
 
-    function mint(address to, uint256 amount) external { _mint(to, amount); }
+    function mint(address to, uint256 amount) external {
+        _mint(to, amount);
+    }
 
-    function setHookTarget(address target) external { hookTarget = target; }
+    function setHookTarget(address target) external {
+        hookTarget = target;
+    }
 
     function _update(address from, address to, uint256 value) internal override {
         super._update(from, to, value);
@@ -23,7 +27,8 @@ contract MaliciousERC20 is ERC20 {
         }
     }
 }
-
-Ask Claude Code:
 ```
-Show me the complete contents of ATTACK_TEST_REPORT.md
+
+Commit message:
+```
+fix: remove markdown artifacts from MaliciousERC20.sol

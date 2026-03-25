@@ -23,21 +23,6 @@ contract MaliciousERC20 is ERC20 {
         }
     }
 }
-```
-
----
-
-## 7. `test/AttackVectors.test.js`
-
-Ask Claude Code to show you this file:
-```
-Show me the complete contents of test/AttackVectors.test.js
-```
-It's 594 lines — too large to include here but Claude Code has it ready.
-
----
-
-## 8. `ATTACK_TEST_REPORT.md`
 
 Ask Claude Code:
 ```

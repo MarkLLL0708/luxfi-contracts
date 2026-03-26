@@ -1,9 +1,8 @@
-```solidity
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
-import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
 interface IFeeDistributor {
@@ -12,7 +11,6 @@ interface IFeeDistributor {
 }
 
 contract LuxfiStaking is ReentrancyGuard, Ownable {
-
     IERC20 public immutable luxfiToken;
     IFeeDistributor public feeDistributor;
 
@@ -22,42 +20,33 @@ contract LuxfiStaking is ReentrancyGuard, Ownable {
     event Staked(address indexed user, uint256 amount);
     event Unstaked(address indexed user, uint256 amount);
 
-    constructor(address _token, address _feeDistributor) {
+    constructor(address _token, address _feeDistributor) Ownable(msg.sender) {
         require(_token != address(0), "Invalid token");
         require(_feeDistributor != address(0), "Invalid distributor");
-
         luxfiToken = IERC20(_token);
         feeDistributor = IFeeDistributor(_feeDistributor);
     }
 
     function stake(uint256 amount) external nonReentrant {
         require(amount > 0, "Invalid amount");
-
         luxfiToken.transferFrom(msg.sender, address(this), amount);
-
         staked[msg.sender] += amount;
         totalStaked += amount;
-
         feeDistributor.registerStaker(msg.sender, amount);
-
         emit Staked(msg.sender, amount);
     }
 
     function unstake(uint256 amount) external nonReentrant {
         require(amount > 0, "Invalid amount");
         require(staked[msg.sender] >= amount, "Insufficient stake");
-
         staked[msg.sender] -= amount;
         totalStaked -= amount;
-
         if (staked[msg.sender] == 0) {
             feeDistributor.unregisterStaker(msg.sender);
         } else {
             feeDistributor.registerStaker(msg.sender, staked[msg.sender]);
         }
-
         luxfiToken.transfer(msg.sender, amount);
-
         emit Unstaked(msg.sender, amount);
     }
 
@@ -66,4 +55,6 @@ contract LuxfiStaking is ReentrancyGuard, Ownable {
         feeDistributor = IFeeDistributor(_fd);
     }
 }
-```
+
+
+

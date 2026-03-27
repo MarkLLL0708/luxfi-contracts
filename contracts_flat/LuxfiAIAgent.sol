@@ -7,21 +7,24 @@ import "@openzeppelin/contracts/utils/Pausable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/token/ERC721/ERC721.sol";
+import "@openzeppelin/contracts/token/ERC721/extensions/ERC721URIStorage.sol";
+
+interface ILuxfiMintable {
+    function mint(address to, uint256 amount) external;
+}
 
 /**
  * @title LuxfiAIAgent
  * @notice Web 4.0 AI Agent — autonomous economic participant on BSC
- * @dev Fixes applied:
- *      - FIX 1: BNB budget tracked and reserved per mission at creation
- *      - FIX 2: LUXFI budget tracked separately, deposited explicitly by owner
- *      - FIX 3: _approveMission() guards balance before payment
+ * @dev Rewards: Fresh LUXFI minted + BNB by difficulty + NFT badge
  */
-contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
+contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard, ERC721URIStorage {
     using SafeERC20 for IERC20;
 
     // ─── WEB 4.0 IDENTITY ────────────────────────────────
     bytes32 public immutable AGENT_ID;
-    string public agentName = "LUXFI COMMAND AI";
+    string public agentName    = "LUXFI COMMAND AI";
     string public agentVersion = "4.0.0";
     uint256 public immutable BIRTH_BLOCK;
     uint256 public immutable BIRTH_TIME;
@@ -29,104 +32,114 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
     // ─── ROLES ───────────────────────────────────────────
     bytes32 public constant AI_ORACLE_ROLE       = keccak256("AI_ORACLE_ROLE");
     bytes32 public constant MISSION_CREATOR_ROLE = keccak256("MISSION_CREATOR_ROLE");
-    bytes32 public constant VERIFIER_ROLE        = keccak256("VERIFIER_ROLE");
 
-    // ─── TOKEN INTERFACES ─────────────────────────────────
-    IERC20 public luxfiToken;
+    // ─── TOKEN ───────────────────────────────────────────
+    ILuxfiMintable public luxfiToken;
     IERC20 public usdtToken;
 
-    // ─── MISSION ECONOMY ──────────────────────────────────
+    // ─── NFT BADGE ───────────────────────────────────────
+    uint256 public badgeTokenId;
+
+    // Badge tier URIs — set by admin
+    mapping(uint8 => string) public badgeURIs;
+
+    // ─── DIFFICULTY REWARD TIERS ─────────────────────────
+    struct RewardTier {
+        uint256 luxfiAmount;
+        uint256 bnbAmount;
+        string  badgeName;
+        uint8   badgeTier;
+    }
+
+    mapping(uint8 => RewardTier) public rewardTiers;
+
+    // ─── MISSION STRUCTS ─────────────────────────────────
     struct AIMission {
-        bytes32 missionId;
-        string codename;
-        string briefing;
-        string[] requirements;
-        uint256 rewardBNB;
-        uint256 rewardLUXFI;
-        uint256 stakeRequired;
-        uint256 createdAt;
-        uint256 deadline;
-        uint256 maxAgents;
-        uint256 claimedCount;
+        bytes32     missionId;
+        string      codename;
+        string      briefing;
+        string[]    requirements;
+        uint256     rewardBNB;
+        uint256     rewardLUXFI;
+        uint256     stakeRequired;
+        uint256     createdAt;
+        uint256     deadline;
+        uint256     maxAgents;
+        uint256     claimedCount;
         MissionStatus status;
         MissionType missionType;
-        string city;
-        string brandName;
-        uint8 difficulty;
-        bool aiGenerated;
-        bytes32 aiSignature;
+        string      city;
+        string      brandName;
+        uint8       difficulty;
+        bool        aiGenerated;
+        bytes32     aiSignature;
     }
 
     enum MissionStatus { ACTIVE, COMPLETED, CANCELLED, EXPIRED }
     enum MissionType {
-        SPOT_IT,
-        FOUNDER_DROP,
-        MYSTERY_SHOP,
-        SIGNAL_BOOST,
-        FIRST_SIGHTING,
-        AI_VERIFY,
-        BRAND_AUDIT,
-        RIVAL_INTEL
+        SPOT_IT, FOUNDER_DROP, MYSTERY_SHOP, SIGNAL_BOOST,
+        FIRST_SIGHTING, AI_VERIFY, BRAND_AUDIT, RIVAL_INTEL
     }
 
     struct MissionClaim {
-        bytes32 claimId;
-        bytes32 missionId;
-        address agent;
-        uint256 stakedAmount;
-        uint256 submittedAt;
-        uint256 approvedAt;
+        bytes32     claimId;
+        bytes32     missionId;
+        address     agent;
+        uint256     stakedAmount;
+        uint256     submittedAt;
+        uint256     approvedAt;
         ClaimStatus status;
-        string intelData;
-        uint256 aiScore;
-        bytes32 proofHash;
-        bool aiVerified;
+        string      intelData;
+        uint256     aiScore;
+        bytes32     proofHash;
+        bool        aiVerified;
+        uint256     badgeTokenId;
     }
 
     enum ClaimStatus { PENDING, SUBMITTED, AI_REVIEWING, APPROVED, REJECTED, DISPUTED }
 
-    // ─── AGENT ECONOMY ───────────────────────────────────
+    // ─── AGENT PROFILE ───────────────────────────────────
     struct AgentProfile {
-        address wallet;
-        bytes32 agentId;
-        string codename;
-        uint256 xp;
-        uint256 missionsCompleted;
-        uint256 missionsAttempted;
-        uint256 totalEarned;
-        uint256 totalStaked;
-        uint256 joinedAt;
+        address       wallet;
+        bytes32       agentId;
+        string        codename;
+        uint256       xp;
+        uint256       missionsCompleted;
+        uint256       missionsAttempted;
+        uint256       totalEarned;
+        uint256       totalStaked;
+        uint256       joinedAt;
         ClearanceLevel clearance;
-        bool isBlacklisted;
-        uint256 reputationScore;
+        bool          isBlacklisted;
+        uint256       reputationScore;
+        uint256[]     badgesEarned;
     }
 
     enum ClearanceLevel { ROOKIE, OPERATIVE, SPECIALIST, GHOST, PHANTOM }
 
     // ─── STORAGE ─────────────────────────────────────────
-    mapping(bytes32 => AIMission)     public missions;
-    mapping(bytes32 => MissionClaim)  public claims;
-    mapping(address => AgentProfile)  public agentProfiles;
-    mapping(address => bytes32[])     public agentMissions;
-    mapping(bytes32 => bytes32[])     public missionClaims;
-    mapping(bytes32 => bool)          public usedProofHashes;
+    mapping(bytes32 => AIMission)    public missions;
+    mapping(bytes32 => MissionClaim) public claims;
+    mapping(address => AgentProfile) public agentProfiles;
+    mapping(address => bytes32[])    public agentMissions;
+    mapping(bytes32 => bytes32[])    public missionClaims;
+    mapping(bytes32 => bool)         public usedProofHashes;
 
     bytes32[] public activeMissionIds;
-    uint256 public missionCount;
-    uint256 public claimCount;
+    uint256   public missionCount;
+    uint256   public claimCount;
 
     // ─── ECONOMICS ───────────────────────────────────────
     uint256 public platformFeeBps = 500;
     uint256 public constant MAX_FEE_BPS = 1000;
-    uint256 public aiMissionBudget;        // BNB available for missions
-    uint256 public luxfiMissionBudget;     // FIX 2: LUXFI available for missions
+    uint256 public aiMissionBudget;
     uint256 public totalRewardsDistributed;
     uint256 public totalMissionsCreated;
     uint256 public totalMissionsCompleted;
-    uint256 public totalSelfFunded;
-    uint256 public lastSelfFundTime;
-    uint256 public constant SELF_FUND_INTERVAL = 1 days;
-    uint256 public dailySelfFundLimit = 1 ether;
+    uint256 public minAIScore = 70;
+
+    address public aiOracleAddress;
+    mapping(bytes32 => uint256) public aiVerificationScores;
 
     // ─── XP REWARDS ──────────────────────────────────────
     uint256 public constant XP_ROUTINE     = 100;
@@ -135,37 +148,31 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
     uint256 public constant XP_AI_VERIFY   = 150;
     uint256 public constant XP_BRAND_AUDIT = 400;
 
-    // ─── AI ORACLE ───────────────────────────────────────
-    address public aiOracleAddress;
-    uint256 public minAIScore = 70;
-    mapping(bytes32 => uint256) public aiVerificationScores;
-
     // ─── EVENTS ──────────────────────────────────────────
     event AgentIdentityCreated(bytes32 indexed agentId, string name, uint256 birthBlock);
     event MissionCreated(bytes32 indexed missionId, string codename, bool aiGenerated);
     event MissionClaimed(bytes32 indexed missionId, bytes32 claimId, address agent);
     event ProofSubmitted(bytes32 indexed claimId, address agent, bytes32 proofHash);
     event AIVerificationComplete(bytes32 indexed claimId, uint256 score, bool approved);
-    event MissionApproved(bytes32 indexed claimId, address agent, uint256 reward);
+    event MissionApproved(bytes32 indexed claimId, address agent, uint256 luxfiMinted, uint256 bnbSent, uint256 badgeId);
     event MissionRejected(bytes32 indexed claimId, address agent, string reason);
     event AgentLevelUp(address indexed agent, ClearanceLevel newLevel);
-    event AISelfFunded(uint256 amount);
+    event BadgeMinted(address indexed agent, uint256 tokenId, uint8 tier, string badgeName);
     event AIBudgetReceived(uint256 amount);
-    event LUXFIBudgetDeposited(uint256 amount);
-    event BrandIntelReport(bytes32 indexed reportId, string brandName, uint256 timestamp);
     event ReputationUpdated(address indexed agent, uint256 newScore);
+    event RewardTierUpdated(uint8 difficulty, uint256 luxfi, uint256 bnb, string badge);
 
     constructor(
         address _luxfiToken,
         address _usdtToken,
         address _aiOracle,
         address _owner
-    ) Ownable(_owner) {
+    ) Ownable(_owner) ERC721("LUXFI Mission Badge", "LMBD") {
         require(_luxfiToken != address(0), "Invalid token");
-        require(_aiOracle != address(0), "Invalid oracle");
+        require(_aiOracle != address(0),   "Invalid oracle");
 
-        luxfiToken     = IERC20(_luxfiToken);
-        usdtToken      = IERC20(_usdtToken);
+        luxfiToken      = ILuxfiMintable(_luxfiToken);
+        usdtToken       = IERC20(_usdtToken);
         aiOracleAddress = _aiOracle;
 
         AGENT_ID = keccak256(abi.encodePacked(
@@ -174,35 +181,49 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
         BIRTH_BLOCK = block.number;
         BIRTH_TIME  = block.timestamp;
 
-        _grantRole(DEFAULT_ADMIN_ROLE,    _owner);
-        _grantRole(AI_ORACLE_ROLE,        _aiOracle);
-        _grantRole(MISSION_CREATOR_ROLE,  _owner);
-        _grantRole(MISSION_CREATOR_ROLE,  _aiOracle);
+        _grantRole(DEFAULT_ADMIN_ROLE,   _owner);
+        _grantRole(AI_ORACLE_ROLE,       _aiOracle);
+        _grantRole(MISSION_CREATOR_ROLE, _owner);
+        _grantRole(MISSION_CREATOR_ROLE, _aiOracle);
+
+        // ─── DEFAULT REWARD TIERS ─────────────────────────
+        // difficulty 1 = ROUTINE, 2 = STANDARD/PRIORITY, 3 = CRITICAL/CLASSIFIED
+        rewardTiers[1] = RewardTier(100  * 1e18, 0.001 ether, "Bronze",   1);
+        rewardTiers[2] = RewardTier(500  * 1e18, 0.005 ether, "Gold",     2);
+        rewardTiers[3] = RewardTier(2500 * 1e18, 0.025 ether, "Diamond",  3);
 
         emit AgentIdentityCreated(AGENT_ID, agentName, block.number);
     }
 
-    // ─── RECEIVE BNB BUDGET ───────────────────────────────
+    // ─── RECEIVE BNB ─────────────────────────────────────
     receive() external payable {
         aiMissionBudget += msg.value;
         emit AIBudgetReceived(msg.value);
     }
 
-    // ─── FIX 2: Deposit LUXFI budget explicitly ───────────
-    function depositLUXFIBudget(uint256 amount) external onlyOwner {
-        require(amount > 0, "Zero amount");
-        luxfiToken.safeTransferFrom(msg.sender, address(this), amount);
-        luxfiMissionBudget += amount;
-        emit LUXFIBudgetDeposited(amount);
+    // ─── SET BADGE URI ────────────────────────────────────
+    function setBadgeURI(uint8 tier, string calldata uri) external onlyOwner {
+        badgeURIs[tier] = uri;
     }
 
-    // ─── AI MISSION CREATION ─────────────────────────────
+    // ─── SET REWARD TIER ──────────────────────────────────
+    function setRewardTier(
+        uint8 difficulty,
+        uint256 luxfiAmount,
+        uint256 bnbAmount,
+        string calldata badge,
+        uint8 badgeTier
+    ) external onlyOwner {
+        require(difficulty >= 1 && difficulty <= 3, "Invalid difficulty");
+        rewardTiers[difficulty] = RewardTier(luxfiAmount, bnbAmount, badge, badgeTier);
+        emit RewardTierUpdated(difficulty, luxfiAmount, bnbAmount, badge);
+    }
+
+    // ─── CREATE MISSION ───────────────────────────────────
     function createMission(
         string calldata codename,
         string calldata briefing,
         string[] calldata requirements,
-        uint256 rewardBNB,
-        uint256 rewardLUXFI,
         uint256 stakeRequired,
         uint256 durationDays,
         uint256 maxAgents,
@@ -213,52 +234,40 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
         bool aiGenerated,
         bytes32 aiSignature
     ) external onlyRole(MISSION_CREATOR_ROLE) whenNotPaused returns (bytes32) {
-        require(bytes(codename).length > 0, "Empty codename");
-        require(rewardBNB > 0 || rewardLUXFI > 0, "Must have reward");
+        require(bytes(codename).length > 0,            "Empty codename");
         require(durationDays >= 1 && durationDays <= 30, "Invalid duration");
-        require(maxAgents >= 1 && maxAgents <= 100, "Invalid max agents");
-        require(difficulty >= 1 && difficulty <= 3, "Invalid difficulty");
+        require(maxAgents >= 1 && maxAgents <= 100,    "Invalid max agents");
+        require(difficulty >= 1 && difficulty <= 3,    "Invalid difficulty");
 
-        if (aiGenerated) {
-            // FIX 1: Reserve BNB budget at creation
-            uint256 totalBNBReward = rewardBNB * maxAgents;
-            if (totalBNBReward > 0) {
-                require(aiMissionBudget >= totalBNBReward, "Insufficient BNB budget");
-                aiMissionBudget -= totalBNBReward;
-                totalSelfFunded += totalBNBReward;
-            }
-
-            // FIX 2: Reserve LUXFI budget at creation
-            uint256 totalLUXFIReward = rewardLUXFI * maxAgents;
-            if (totalLUXFIReward > 0) {
-                require(luxfiMissionBudget >= totalLUXFIReward, "Insufficient LUXFI budget");
-                luxfiMissionBudget -= totalLUXFIReward;
-            }
-        }
+        // Reserve BNB budget for all potential agents
+        RewardTier memory tier = rewardTiers[difficulty];
+        uint256 totalBNBNeeded = tier.bnbAmount * maxAgents;
+        require(aiMissionBudget >= totalBNBNeeded, "Insufficient BNB budget");
+        aiMissionBudget -= totalBNBNeeded;
 
         bytes32 missionId = keccak256(abi.encodePacked(
             codename, block.timestamp, missionCount++
         ));
 
         missions[missionId] = AIMission({
-            missionId:   missionId,
-            codename:    codename,
-            briefing:    briefing,
+            missionId:    missionId,
+            codename:     codename,
+            briefing:     briefing,
             requirements: requirements,
-            rewardBNB:   rewardBNB,
-            rewardLUXFI: rewardLUXFI,
+            rewardBNB:    tier.bnbAmount,
+            rewardLUXFI:  tier.luxfiAmount,
             stakeRequired: stakeRequired,
-            createdAt:   block.timestamp,
-            deadline:    block.timestamp + (durationDays * 1 days),
-            maxAgents:   maxAgents,
+            createdAt:    block.timestamp,
+            deadline:     block.timestamp + (durationDays * 1 days),
+            maxAgents:    maxAgents,
             claimedCount: 0,
-            status:      MissionStatus.ACTIVE,
-            missionType: missionType,
-            city:        city,
-            brandName:   brandName,
-            difficulty:  difficulty,
-            aiGenerated: aiGenerated,
-            aiSignature: aiSignature
+            status:       MissionStatus.ACTIVE,
+            missionType:  missionType,
+            city:         city,
+            brandName:    brandName,
+            difficulty:   difficulty,
+            aiGenerated:  aiGenerated,
+            aiSignature:  aiSignature
         });
 
         activeMissionIds.push(missionId);
@@ -277,25 +286,27 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
             msg.sender, block.timestamp, codename
         ));
 
+        uint256[] memory emptyBadges;
         agentProfiles[msg.sender] = AgentProfile({
-            wallet:           msg.sender,
-            agentId:          agentId,
-            codename:         codename,
-            xp:               0,
+            wallet:            msg.sender,
+            agentId:           agentId,
+            codename:          codename,
+            xp:                0,
             missionsCompleted: 0,
             missionsAttempted: 0,
-            totalEarned:      0,
-            totalStaked:      0,
-            joinedAt:         block.timestamp,
-            clearance:        ClearanceLevel.ROOKIE,
-            isBlacklisted:    false,
-            reputationScore:  500
+            totalEarned:       0,
+            totalStaked:       0,
+            joinedAt:          block.timestamp,
+            clearance:         ClearanceLevel.ROOKIE,
+            isBlacklisted:     false,
+            reputationScore:   500,
+            badgesEarned:      emptyBadges
         });
     }
 
     // ─── CLAIM MISSION ────────────────────────────────────
     function claimMission(bytes32 missionId) external payable nonReentrant whenNotPaused {
-        AIMission storage m    = missions[missionId];
+        AIMission storage m        = missions[missionId];
         AgentProfile storage agent = agentProfiles[msg.sender];
 
         require(m.status == MissionStatus.ACTIVE, "Mission not active");
@@ -311,17 +322,18 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
         ));
 
         claims[claimId] = MissionClaim({
-            claimId:     claimId,
-            missionId:   missionId,
-            agent:       msg.sender,
+            claimId:      claimId,
+            missionId:    missionId,
+            agent:        msg.sender,
             stakedAmount: msg.value,
-            submittedAt: 0,
-            approvedAt:  0,
-            status:      ClaimStatus.PENDING,
-            intelData:   "",
-            aiScore:     0,
-            proofHash:   bytes32(0),
-            aiVerified:  false
+            submittedAt:  0,
+            approvedAt:   0,
+            status:       ClaimStatus.PENDING,
+            intelData:    "",
+            aiScore:      0,
+            proofHash:    bytes32(0),
+            aiVerified:   false,
+            badgeTokenId: 0
         });
 
         missionClaims[missionId].push(claimId);
@@ -340,13 +352,13 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
         bytes32 proofHash
     ) external whenNotPaused {
         MissionClaim storage claim = claims[claimId];
-        require(claim.agent == msg.sender,       "Not your claim");
+        require(claim.agent == msg.sender,           "Not your claim");
         require(claim.status == ClaimStatus.PENDING, "Wrong status");
-        require(!usedProofHashes[proofHash],     "Duplicate proof");
-        require(bytes(intelData).length > 0,     "Empty intel");
+        require(!usedProofHashes[proofHash],         "Duplicate proof");
+        require(bytes(intelData).length > 0,         "Empty intel");
 
         AIMission storage m = missions[claim.missionId];
-        require(block.timestamp < m.deadline,    "Mission expired");
+        require(block.timestamp < m.deadline, "Mission expired");
 
         usedProofHashes[proofHash] = true;
         claim.intelData   = intelData;
@@ -372,9 +384,9 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
         );
         require(score <= 100, "Invalid score");
 
-        claim.aiScore   = score;
+        claim.aiScore    = score;
         claim.aiVerified = true;
-        claim.status    = ClaimStatus.AI_REVIEWING;
+        claim.status     = ClaimStatus.AI_REVIEWING;
         aiVerificationScores[claimId] = score;
 
         emit AIVerificationComplete(claimId, score, approved);
@@ -392,40 +404,50 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
         AIMission storage m        = missions[claim.missionId];
         AgentProfile storage agent = agentProfiles[claim.agent];
 
+        // CEI — update state first
         claim.status     = ClaimStatus.APPROVED;
         claim.approvedAt = block.timestamp;
 
-        // FIX 1: Guard BNB balance before payment
-        uint256 fee         = (m.rewardBNB * platformFeeBps) / 10000;
-        uint256 agentReward = m.rewardBNB - fee + claim.stakedAmount;
+        RewardTier memory tier = rewardTiers[m.difficulty];
 
-        if (agentReward > 0) {
-            require(address(this).balance >= agentReward, "Insufficient BNB balance");
-            (bool success,) = payable(claim.agent).call{value: agentReward}("");
-            if (success) totalRewardsDistributed += m.rewardBNB;
+        // 1 — Mint fresh LUXFI tokens to agent
+        uint256 luxfiReward = tier.luxfiAmount;
+        luxfiToken.mint(claim.agent, luxfiReward);
+
+        // 2 — Send BNB reward + return stake
+        uint256 fee         = (tier.bnbAmount * platformFeeBps) / 10000;
+        uint256 agentBNB    = tier.bnbAmount - fee + claim.stakedAmount;
+        require(address(this).balance >= agentBNB, "Insufficient BNB");
+        (bool bnbSent,) = payable(claim.agent).call{value: agentBNB}("");
+        if (!bnbSent) {
+            aiMissionBudget += tier.bnbAmount;
         }
 
-        // FIX 2: Guard LUXFI balance before transfer
-        if (m.rewardLUXFI > 0) {
-            require(
-                luxfiToken.balanceOf(address(this)) >= m.rewardLUXFI,
-                "Insufficient LUXFI balance"
-            );
-            luxfiToken.safeTransfer(claim.agent, m.rewardLUXFI);
+        // 3 — Mint NFT badge
+        uint256 newBadgeId = ++badgeTokenId;
+        _mint(claim.agent, newBadgeId);
+        if (bytes(badgeURIs[tier.badgeTier]).length > 0) {
+            _setTokenURI(newBadgeId, badgeURIs[tier.badgeTier]);
         }
+        claim.badgeTokenId = newBadgeId;
+        agent.badgesEarned.push(newBadgeId);
 
+        // 4 — Update agent stats
         uint256 xpEarned = _getXPForDifficulty(m.difficulty, m.missionType);
         agent.xp += xpEarned;
         agent.missionsCompleted++;
-        agent.totalEarned += m.rewardBNB;
+        agent.totalEarned += tier.bnbAmount + luxfiReward;
 
         uint256 newRep = agent.reputationScore + (claim.aiScore / 10);
         agent.reputationScore = newRep > 1000 ? 1000 : newRep;
 
-        _checkLevelUp(claim.agent);
+        totalRewardsDistributed += luxfiReward;
         totalMissionsCompleted++;
 
-        emit MissionApproved(claimId, claim.agent, agentReward);
+        _checkLevelUp(claim.agent);
+
+        emit BadgeMinted(claim.agent, newBadgeId, tier.badgeTier, tier.badgeName);
+        emit MissionApproved(claimId, claim.agent, luxfiReward, agentBNB, newBadgeId);
         emit ReputationUpdated(claim.agent, agent.reputationScore);
     }
 
@@ -443,7 +465,6 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
             (bool success,) = payable(claim.agent).call{value: returnAmount}("");
             if (!success) aiMissionBudget += returnAmount;
         }
-
         aiMissionBudget += slashAmount;
 
         uint256 repReduction = (100 - claim.aiScore) / 5;
@@ -457,15 +478,15 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
         emit ReputationUpdated(claim.agent, agent.reputationScore);
     }
 
-    // ─── LEVEL UP CHECK ───────────────────────────────────
+    // ─── LEVEL UP ─────────────────────────────────────────
     function _checkLevelUp(address agentWallet) internal {
         AgentProfile storage agent = agentProfiles[agentWallet];
         ClearanceLevel newLevel    = agent.clearance;
 
-        if (agent.xp >= 10000)     newLevel = ClearanceLevel.PHANTOM;
-        else if (agent.xp >= 5000) newLevel = ClearanceLevel.GHOST;
-        else if (agent.xp >= 2000) newLevel = ClearanceLevel.SPECIALIST;
-        else if (agent.xp >= 500)  newLevel = ClearanceLevel.OPERATIVE;
+        if      (agent.xp >= 10000) newLevel = ClearanceLevel.PHANTOM;
+        else if (agent.xp >= 5000)  newLevel = ClearanceLevel.GHOST;
+        else if (agent.xp >= 2000)  newLevel = ClearanceLevel.SPECIALIST;
+        else if (agent.xp >= 500)   newLevel = ClearanceLevel.OPERATIVE;
 
         if (newLevel != agent.clearance) {
             agent.clearance = newLevel;
@@ -479,28 +500,14 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
         MissionType missionType
     ) internal pure returns (uint256) {
         uint256 baseXP;
-        if (difficulty == 3)      baseXP = XP_EYES_ONLY;
+        if      (difficulty == 3) baseXP = XP_EYES_ONLY;
         else if (difficulty == 2) baseXP = XP_CLASSIFIED;
         else                      baseXP = XP_ROUTINE;
 
-        if (missionType == MissionType.BRAND_AUDIT) baseXP = XP_BRAND_AUDIT;
-        else if (missionType == MissionType.AI_VERIFY) baseXP = XP_AI_VERIFY;
+        if      (missionType == MissionType.BRAND_AUDIT) baseXP = XP_BRAND_AUDIT;
+        else if (missionType == MissionType.AI_VERIFY)   baseXP = XP_AI_VERIFY;
 
         return baseXP;
-    }
-
-    // ─── BRAND INTEL REPORT ───────────────────────────────
-    function submitBrandIntelReport(
-        string calldata brandName,
-        bytes32 dataHash,
-        uint256,
-        uint256
-    ) external onlyRole(AI_ORACLE_ROLE) returns (bytes32) {
-        bytes32 reportId = keccak256(abi.encodePacked(
-            brandName, block.timestamp, dataHash
-        ));
-        emit BrandIntelReport(reportId, brandName, block.timestamp);
-        return reportId;
     }
 
     // ─── ADMIN ───────────────────────────────────────────
@@ -529,37 +536,17 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
         missions[missionId].status = MissionStatus.CANCELLED;
     }
 
-    function withdrawAgentBudget(uint256 amount) external onlyOwner {
+    function withdrawBudget(uint256 amount) external onlyOwner {
         require(amount <= aiMissionBudget, "Exceeds budget");
         aiMissionBudget -= amount;
         (bool success,) = payable(owner()).call{value: amount}("");
         require(success, "Transfer failed");
     }
 
-    function pause() external onlyOwner { _pause(); }
+    function pause()   external onlyOwner { _pause(); }
     function unpause() external onlyOwner { _unpause(); }
 
     // ─── VIEWS ───────────────────────────────────────────
-    function getAgentIdentity() external view returns (
-        bytes32 id,
-        string memory name,
-        string memory version,
-        uint256 birthBlock,
-        uint256 birthTime,
-        uint256 budget,
-        uint256 luxfiBudget,
-        uint256 totalFunded,
-        uint256 missionsCreated,
-        uint256 missionsCompleted
-    ) {
-        return (
-            AGENT_ID, agentName, agentVersion,
-            BIRTH_BLOCK, BIRTH_TIME,
-            aiMissionBudget, luxfiMissionBudget,
-            totalSelfFunded, totalMissionsCreated, totalMissionsCompleted
-        );
-    }
-
     function getMission(bytes32 missionId) external view returns (AIMission memory) {
         return missions[missionId];
     }
@@ -579,32 +566,40 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard {
                 block.timestamp < missions[activeMissionIds[i]].deadline) count++;
         }
         bytes32[] memory active = new bytes32[](count);
-        uint256 index = 0;
+        uint256 idx = 0;
         for (uint256 i = 0; i < activeMissionIds.length; i++) {
             if (missions[activeMissionIds[i]].status == MissionStatus.ACTIVE &&
                 block.timestamp < missions[activeMissionIds[i]].deadline) {
-                active[index++] = activeMissionIds[i];
+                active[idx++] = activeMissionIds[i];
             }
         }
         return active;
     }
 
-    function getAgentMissions(address agent) external view returns (bytes32[] memory) {
-        return agentMissions[agent];
+    function getAgentBadges(address agent) external view returns (uint256[] memory) {
+        return agentProfiles[agent].badgesEarned;
     }
 
-    function getClearanceName(ClearanceLevel level) external pure returns (string memory) {
-        if (level == ClearanceLevel.PHANTOM)    return "PHANTOM";
-        if (level == ClearanceLevel.GHOST)      return "GHOST";
-        if (level == ClearanceLevel.SPECIALIST) return "SPECIALIST";
-        if (level == ClearanceLevel.OPERATIVE)  return "OPERATIVE";
-        return "ROOKIE";
+    function getRewardTier(uint8 difficulty) external view returns (RewardTier memory) {
+        return rewardTiers[difficulty];
     }
 
     function supportsInterface(bytes4 interfaceId)
-        public view override(AccessControl)
+        public view override(AccessControl, ERC721URIStorage)
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
     }
 }
+```
+
+---
+
+Commit message:
+```
+feat: mission rewards — mint LUXFI + BNB by difficulty + NFT badge on approval
+```
+
+Then in Codespace run:
+```
+npx hardhat clean && npx hardhat compile && npx hardhat test

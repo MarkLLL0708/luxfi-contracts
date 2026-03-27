@@ -591,15 +591,6 @@ contract LuxfiAIAgent is Ownable, AccessControl, Pausable, ReentrancyGuard, ERC7
         return super.supportsInterface(interfaceId);
     }
 }
-```
 
----
 
-Commit message:
-```
-feat: mission rewards — mint LUXFI + BNB by difficulty + NFT badge on approval
-```
 
-Then in Codespace run:
-```
-npx hardhat clean && npx hardhat compile && npx hardhat test

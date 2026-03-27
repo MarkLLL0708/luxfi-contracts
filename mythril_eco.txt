@@ -1,17 +1,4 @@
 /usr/local/python/3.12.1/lib/python3.12/site-packages/eth/__init__.py:1: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
   import pkg_resources
-mythril.interfaces.cli [ERROR]: Traceback (most recent call last):
-  File "/usr/local/python/3.12.1/lib/python3.12/site-packages/mythril/interfaces/cli.py", line 975, in parse_args_and_execute
-    address = load_code(disassembler, args)
-              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/python/3.12.1/lib/python3.12/site-packages/mythril/interfaces/cli.py", line 726, in load_code
-    address, _ = disassembler.load_from_solidity(
-                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/python/3.12.1/lib/python3.12/site-packages/mythril/mythril/mythril_disassembler.py", line 277, in load_from_solidity
-    solc_binary, self.solc_version = util.extract_binary(file)
-                                     ^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/usr/local/python/3.12.1/lib/python3.12/site-packages/mythril/ethereum/util.py", line 222, in extract_binary
-    with open(file) as f:
-         ^^^^^^^^^^
-FileNotFoundError: [Errno 2] No such file or directory: 'contracts/contracts/EcoGovernor.sol'
+The analysis was completed successfully. No issues were detected.
 

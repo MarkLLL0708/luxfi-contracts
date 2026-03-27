@@ -2,6 +2,7 @@
 pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/token/ERC20/IERC20.sol";
+import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 
@@ -11,6 +12,8 @@ interface IFeeDistributor {
 }
 
 contract LuxfiStaking is ReentrancyGuard, Ownable {
+    using SafeERC20 for IERC20;
+
     IERC20 public immutable luxfiToken;
     IFeeDistributor public feeDistributor;
 
@@ -29,7 +32,7 @@ contract LuxfiStaking is ReentrancyGuard, Ownable {
 
     function stake(uint256 amount) external nonReentrant {
         require(amount > 0, "Invalid amount");
-        luxfiToken.transferFrom(msg.sender, address(this), amount);
+        luxfiToken.safeTransferFrom(msg.sender, address(this), amount);
         staked[msg.sender] += amount;
         totalStaked += amount;
         feeDistributor.registerStaker(msg.sender, amount);
@@ -46,15 +49,12 @@ contract LuxfiStaking is ReentrancyGuard, Ownable {
         } else {
             feeDistributor.registerStaker(msg.sender, staked[msg.sender]);
         }
-        luxfiToken.transfer(msg.sender, amount);
+        luxfiToken.safeTransfer(msg.sender, amount);
         emit Unstaked(msg.sender, amount);
     }
 
-    function setFeeDistributor(address _fd) external onlyOwner {
-        require(_fd != address(0), "Invalid address");
-        feeDistributor = IFeeDistributor(_fd);
+    function setFeeDistributor(address newFeeDistributor) external onlyOwner {
+        require(newFeeDistributor != address(0), "Invalid address");
+        feeDistributor = IFeeDistributor(newFeeDistributor);
     }
 }
-
-
-

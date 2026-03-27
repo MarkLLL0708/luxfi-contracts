@@ -43,7 +43,7 @@ contract LuxfiToken is ERC20, AccessControl, Pausable, ReentrancyGuard {
     uint256 public constant MAX_PRICE_AGE = 1 hours;
 
     // ─── PANCAKESWAP ──────────────────────────────────────
-    IPancakeRouter public pancakeRouter;
+    IPancakeRouter public immutable pancakeRouter;
 
     // ─── FEE DISTRIBUTOR ─────────────────────────────────
     IFeeDistributor public feeDistributor;
@@ -236,14 +236,14 @@ contract LuxfiToken is ERC20, AccessControl, Pausable, ReentrancyGuard {
         );
         require(totalSupply() + tokenAmount <= MAX_SUPPLY, "Exceeds max supply");
 
+        lastPurchaseTime[buyer] = block.timestamp;
+        lastTransferTime[buyer] = block.timestamp;
+        _mint(buyer, tokenAmount);
+
         if (protocolFee > 0 && address(feeDistributor) != address(0)) {
             feeDistributor.receiveFees{value: protocolFee}("TOKEN_PURCHASE");
             totalFeesCollected += protocolFee;
         }
-
-        lastPurchaseTime[buyer] = block.timestamp;
-        lastTransferTime[buyer] = block.timestamp;
-        _mint(buyer, tokenAmount);
 
         // Notify governance contracts
         if (ecoGovernor != address(0)) {
@@ -336,6 +336,8 @@ contract LuxfiToken is ERC20, AccessControl, Pausable, ReentrancyGuard {
 
     // ─── ADMIN ────────────────────────────────────────────
     function setGovernance(address _ecoGovernor, address _brandGovernor) external onlyRole(ADMIN_ROLE) {
+        require(_ecoGovernor != address(0), "Invalid ecoGovernor");
+        require(_brandGovernor != address(0), "Invalid brandGovernor");
         ecoGovernor   = _ecoGovernor;
         brandGovernor = _brandGovernor;
         emit GovernanceSet(_ecoGovernor, _brandGovernor);

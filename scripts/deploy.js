@@ -64,7 +64,10 @@ async function main() {
   // ─── 7. ParticipationVault ────────────────────────────
   console.log("\n[7/14] Deploying ParticipationVault...");
   const ParticipationVault = await ethers.getContractFactory("ParticipationVault");
-  const participationVault = await ParticipationVault.deploy(addresses.LuxfiToken);
+  const participationVault = await ParticipationVault.deploy(
+    addresses.LuxfiToken,
+    addresses.LuxfiFeeDistributor
+  );
   await participationVault.waitForDeployment();
   addresses.ParticipationVault = await participationVault.getAddress();
   console.log("ParticipationVault:", addresses.ParticipationVault);
@@ -96,7 +99,10 @@ async function main() {
   // ─── 11. RWBOMarketplace ──────────────────────────────
   console.log("\n[11/14] Deploying RWBOMarketplace...");
   const RWBOMarketplace = await ethers.getContractFactory("RWBOMarketplace");
-  const rwboMarketplace = await RWBOMarketplace.deploy(addresses.LuxfiToken);
+  const rwboMarketplace = await RWBOMarketplace.deploy(
+    addresses.LuxfiToken,
+    deployer.address
+  );
   await rwboMarketplace.waitForDeployment();
   addresses.RWBOMarketplace = await rwboMarketplace.getAddress();
   console.log("RWBOMarketplace:", addresses.RWBOMarketplace);
@@ -125,13 +131,6 @@ async function main() {
   addresses.LuxfiStaking = await luxfiStaking.getAddress();
   console.log("LuxfiStaking:", addresses.LuxfiStaking);
 
-  // ─── 14. LuxfiCircuitBreaker ──────────────────────────
-  console.log("\n[14/14] Deploying LuxfiCircuitBreaker...");
-  const LuxfiCircuitBreaker = await ethers.getContractFactory("LuxfiCircuitBreaker");
-  const circuitBreaker = await LuxfiCircuitBreaker.deploy();
-  await circuitBreaker.waitForDeployment();
-  addresses.LuxfiCircuitBreaker = await circuitBreaker.getAddress();
-  console.log("LuxfiCircuitBreaker:", addresses.LuxfiCircuitBreaker);
 
   // ─── POST DEPLOY WIRING ───────────────────────────────
   console.log("\n======= POST DEPLOY WIRING =======");
@@ -154,7 +153,7 @@ async function main() {
   console.log("Whitelisting LuxfiStaking in FeeDistributor...");
   await feeDistributor.setWhitelistedSender(addresses.LuxfiStaking, true);
 
-  console.log("Setting StakingPool in FeeDistributor...");
+  console.log("Setting addresses in FeeDistributor...");
   await feeDistributor.updateAddresses(
     deployer.address,
     addresses.LuxfiAIAgent,
@@ -171,12 +170,12 @@ async function main() {
   });
   console.log("========================================");
   console.log("\nNEXT STEPS:");
-  console.log("1. Update backend .env with contract addresses");
+  console.log("1. Update backend env with contract addresses");
   console.log("2. Update Lovable frontend with contract addresses");
   console.log("3. Transfer ownership to Gnosis Safe");
   console.log("4. Verify contracts on BSCScan");
   console.log("5. Fund LuxfiAIAgent with BNB for mission rewards");
-  console.log("6. Call luxfiToken.setTransfersEnabled(true) when ready");
+  console.log("6. Call luxfiToken.setTransfersEnabled(true) when ready to trade");
 }
 
 main().catch((error) => {
